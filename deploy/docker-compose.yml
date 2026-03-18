@@ -19,8 +19,8 @@ services:
       - PROXY_ENABLED=${PROXY_ENABLED:-false}
       - CHECK_INTERVAL_MINUTES=${CHECK_INTERVAL_MINUTES:-30}
     volumes:
-      - steam_db:/app/steam_monitor.db
-      - steam_logs:/app/bot.log
+      - steam_db:/app
+      - steam_logs:/app/bot_logs
     healthcheck:
       test: ["CMD-SHELL", "ps aux | grep '[m]ain.py' || exit 1"]
       interval: 30s
