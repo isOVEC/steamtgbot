@@ -35,44 +35,134 @@ class InventoryMonitor:
         else:
             self.check_interval = CHECK_INTERVAL_MINUTES
         
-        self._monitoring_tasks: Dict[str, asyncio.Task] = {}
         self._running = False
+        self._main_task: Optional[asyncio.Task] = None
         self._notification_callback: Optional[Callable] = None
-        self._accounts_to_monitor: Dict[str, Dict[str, Any]] = {}  # steam_id64 -> {game, interval, ...}
+        self._dashboard_callback: Optional[Callable] = None
+        self._accounts_to_monitor: Dict[str, Dict[str, Any]] = {}
+        self._last_dashboard_results: List[Dict] = []
 
     def set_notification_callback(self, callback: Callable) -> None:
         """Установка callback для уведомлений"""
         self._notification_callback = callback
 
     async def start(self) -> None:
-        """Запуск мониторинга"""
+        """Запуск основного цикла мониторинга"""
+        if self._running:
+            logger.warning("Мониторинг уже запущен.")
+            return
+
         self._running = True
-        logger.info(f"Мониторинг запущен (интервал проверки: {self.check_interval} минут)")
-        
-        # Загружаем активные аккаунты
-        accounts = await self.db.get_active_accounts()
-        
-        for account in accounts:
-            steam_id64 = account["steam_id64"]
-            game = account.get("game", "cs2")
-            # Запускаем индивидуальную задачу для каждого аккаунта
-            await self.start_monitoring_account(steam_id64, game)
+        self._main_task = asyncio.create_task(self._main_monitoring_loop())
+        logger.info("Основной цикл мониторинга запущен.")
 
     async def stop(self) -> None:
-        """Остановка мониторинга"""
+        """Остановка основного цикла мониторинга"""
+        if not self._running or not self._main_task:
+            logger.warning("Мониторинг не запущен.")
+            return
+
         self._running = False
+        self._main_task.cancel()
+        try:
+            await self._main_task
+        except asyncio.CancelledError:
+            logger.info("Основной цикл мониторинга успешно остановлен.")
         
-        # Останавливаем все задачи мониторинга
-        for steam_id64, task in list(self._monitoring_tasks.items()):
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        
-        self._monitoring_tasks.clear()
         self._accounts_to_monitor.clear()
-        logger.info("Мониторинг остановлен")
+        self._main_task = None
+
+    def get_last_dashboard_results(self) -> List[Dict]:
+        """Возвращает результаты последнего завершенного цикла проверок."""
+        return self._last_dashboard_results
+
+    async def initial_check(self) -> None:
+        """Выполняет первоначальную проверку всех аккаунтов при запуске."""
+        logger.info("Начало первоначальной проверки всех аккаунтов...")
+        accounts = list(self._accounts_to_monitor.keys())
+        if not accounts:
+            logger.info("Нет аккаунтов для первоначальной проверки.")
+            return
+
+        dashboard_results = []
+        for steam_id64 in accounts:
+            account_info = self._accounts_to_monitor.get(steam_id64)
+            if not account_info:
+                continue
+
+            game = account_info.get("game", "cs2")
+            result = await self.check_inventory(steam_id64, game)
+            dashboard_results.append({"steam_id": steam_id64, "game": game, **result})
+            # Небольшая задержка между запросами, чтобы не перегружать API
+            await asyncio.sleep(1)
+
+        self._last_dashboard_results = dashboard_results
+        logger.info("Первоначальная проверка всех аккаунтов завершена.")
+
+
+
+    async def _main_monitoring_loop(self) -> None:
+        """Главный цикл, который управляет проверками всех аккаунтов."""
+        logger.info("Главный цикл мониторинга начал работу.")
+        while self._running:
+            try:
+                accounts = list(self._accounts_to_monitor.keys())
+                if not accounts:
+                    await asyncio.sleep(5)  # Ждем, если нет аккаунтов
+                    continue
+
+                dashboard_results = []
+                # Глобальный интервал используется как базовый
+                interval_seconds = self.check_interval * 60
+                
+                # Вычисляем "шаг лесенки"
+                step_delay = interval_seconds / len(accounts)
+                step_delay = max(1, step_delay) # Не менее 1 секунды
+
+                logger.info(f"Начинается новый цикл проверки для {len(accounts)} аккаунтов. "
+                            f"Общий интервал: {self.check_interval} мин, шаг: {step_delay:.2f} сек.")
+
+                for steam_id64 in accounts:
+                    if not self._running:
+                        break
+                    
+                    account_info = self._accounts_to_monitor.get(steam_id64)
+                    if not account_info:
+                        continue
+
+                    game = account_info.get("game", "cs2")
+                    logger.debug(f"Проверка аккаунта: {steam_id64}")
+                    
+                    result = await self.check_inventory(steam_id64, game)
+                    dashboard_results.append({"steam_id": steam_id64, "game": game, **result})
+
+                    # Отправляем мгновенное уведомление, если есть изменения
+                    if (result["added"] or result["removed"]) and self._notification_callback:
+                        await self._notification_callback(
+                            steam_id64,
+                            result["added"],
+                            result["removed"],
+                            game
+                        )
+                    
+                    await asyncio.sleep(step_delay)
+
+                # Отправка дэшборда после завершения цикла
+                if self._running and self._dashboard_callback:
+                    await self._dashboard_callback(dashboard_results)
+                
+                logger.info("Цикл проверки завершен.")
+
+            except asyncio.CancelledError:
+                logger.info("Главный цикл мониторинга был прерван.")
+                break
+            except Exception as e:
+                logger.error(f"Критическая ошибка в главном цикле мониторинга: {e}", exc_info=True)
+                await asyncio.sleep(60) # Пауза перед перезапуском цикла в случае ошибки
+
+    def set_dashboard_callback(self, callback: Callable) -> None:
+        """Установка callback для дэшборда."""
+        self._dashboard_callback = callback
 
     async def start_monitoring_account(
         self, 
@@ -80,92 +170,25 @@ class InventoryMonitor:
         game: str = "cs2",
         interval_minutes: Optional[int] = None
     ) -> None:
-        """Добавление аккаунта в мониторинг"""
-        if steam_id64 in self._monitoring_tasks:
-            logger.warning(f"Аккаунт {steam_id64} уже в мониторинге")
+        """Добавление аккаунта в мониторинг."""
+        if steam_id64 in self._accounts_to_monitor:
+            logger.warning(f"Аккаунт {steam_id64} уже отслеживается.")
             return
-        
-        # Используем переданный интервал или глобальный
+
         interval = interval_minutes or self.check_interval
-        interval = max(MIN_CHECK_INTERVAL, min(MAX_CHECK_INTERVAL, interval))
-        
         self._accounts_to_monitor[steam_id64] = {
             "game": game,
             "interval": interval
         }
-        
-        # Создаём задачу мониторинга для этого аккаунта
-        task = asyncio.create_task(
-            self._monitor_account_loop(steam_id64, game, interval),
-            name=f"monitor_{steam_id64}"
-        )
-        self._monitoring_tasks[steam_id64] = task
-        
-        logger.info(f"Аккаунт {steam_id64} добавлен в мониторинг (интервал: {interval} мин)")
+        logger.info(f"Аккаунт {steam_id64} добавлен в список мониторинга.")
 
     async def stop_monitoring_account(self, steam_id64: str) -> None:
-        """Удаление аккаунта из мониторинга"""
-        if steam_id64 in self._monitoring_tasks:
-            self._monitoring_tasks[steam_id64].cancel()
-            try:
-                await self._monitoring_tasks[steam_id64]
-            except asyncio.CancelledError:
-                pass
-            del self._monitoring_tasks[steam_id64]
-        
+        """Удаление аккаунта из мониторинга."""
         if steam_id64 in self._accounts_to_monitor:
             del self._accounts_to_monitor[steam_id64]
-        
-        logger.info(f"Аккаунт {steam_id64} удалён из мониторинга")
-
-    async def _monitor_account_loop(
-        self, 
-        steam_id64: str, 
-        game: str, 
-        interval_minutes: int
-    ) -> None:
-        """
-        Цикл мониторинга отдельного аккаунта
-        
-        Args:
-            steam_id64: Steam ID64 аккаунта
-            game: Игра для мониторинга
-            interval_minutes: Интервал проверки в минутах
-        """
-        interval_seconds = interval_minutes * 60
-        
-        # Небольшая начальная задержка для распределения нагрузки
-        # (чтобы не проверять все аккаунты одновременно)
-        await asyncio.sleep(5)
-        
-        while self._running and steam_id64 in self._accounts_to_monitor:
-            try:
-                logger.debug(f"Проверка аккаунта {steam_id64} (интервал: {interval_minutes} мин)")
-                
-                result = await self.check_inventory(steam_id64, game)
-                
-                if result["error"]:
-                    logger.warning(f"Ошибка проверки {steam_id64}: {result['error']}")
-                else:
-                    # Отправляем уведомление только если есть изменения
-                    if (result["added"] or result["removed"]) and self._notification_callback:
-                        await self._notification_callback(
-                            steam_id64, 
-                            result["added"], 
-                            result["removed"],
-                            game
-                        )
-                
-                # Ждём до следующей проверки
-                await asyncio.sleep(interval_seconds)
-                
-            except asyncio.CancelledError:
-                logger.debug(f"Мониторинг аккаунта {steam_id64} остановлен")
-                break
-            except Exception as e:
-                logger.error(f"Ошибка в цикле мониторинга {steam_id64}: {e}")
-                # При ошибке ждём минуту перед повторной попыткой
-                await asyncio.sleep(60)
+            logger.info(f"Аккаунт {steam_id64} удален из списка мониторинга.")
+        else:
+            logger.warning(f"Попытка удалить несуществующий аккаунт {steam_id64} из мониторинга.")
 
     async def check_inventory(self, steam_id64: str, game: str = "cs2") -> Dict[str, Any]:
         """
@@ -219,6 +242,7 @@ class InventoryMonitor:
                     game
                 )
             
+            logger.info(f"Сбор инвентаря для {steam_id64} (игра: {game}) завершен. Найдено {len(new_inventory)} предметов.")
             return {
                 "added": added,
                 "removed": removed,

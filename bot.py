@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from typing import Optional
+from datetime import datetime
 
 from telegram import (
     Update, 
@@ -23,6 +24,7 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
+from telegram.request import HTTPXRequest
 
 from database import Database
 from steam_api import SteamAPI, RateLimiter
@@ -64,11 +66,20 @@ class SteamMonitorBot:
         rate_limiter = RateLimiter()
         self.monitor = InventoryMonitor(self.db, self.steam_api, rate_limiter)
         
-        # Установка callback для уведомлений
+        # Установка callback для уведомлений и дэшборда
         self.monitor.set_notification_callback(self.send_inventory_update)
+        self.monitor.set_dashboard_callback(self.send_dashboard_summary)
         
         # Инициализация Telegram Application
-        self.app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        builder = Application.builder().token(TELEGRAM_BOT_TOKEN)
+
+        if PROXY_ENABLED and PROXY_URL:
+            logger.info(f"Использование прокси для Telegram: {PROXY_URL}")
+            request = HTTPXRequest(proxy_url=PROXY_URL)
+            builder.request(request)
+            builder.get_updates_request(request)
+
+        self.app = builder.build()
         
         # Регистрируем обработчики команд
         self.app.add_handler(CommandHandler("start", self.start_command))
@@ -81,6 +92,7 @@ class SteamMonitorBot:
         self.app.add_handler(CommandHandler("check", self.check_command))
         self.app.add_handler(CommandHandler("history", self.history_command))
         self.app.add_handler(CommandHandler("proxy", self.proxy_command))
+        self.app.add_handler(CommandHandler("dashboard", self.dashboard_command))
 
         # Обработчик callback (inline кнопки)
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -90,6 +102,18 @@ class SteamMonitorBot:
         
         # Установка меню команд
         await self._setup_commands()
+
+        # Загружаем активные аккаунты из БД и добавляем в монитор
+        accounts = await self.db.get_active_accounts()
+        for account in accounts:
+            await self.monitor.start_monitoring_account(
+                account["steam_id64"],
+                account.get("game", "cs2"),
+                account.get("interval_minutes")
+            )
+
+        # Выполняем первоначальную проверку
+        await self.monitor.initial_check()
         
         # Запуск мониторинга
         await self.monitor.start()
@@ -105,6 +129,78 @@ class SteamMonitorBot:
         if self.db:
             await self.db.close()
         logger.info("Бот выключен")
+
+    async def send_startup_notification(self, accounts: list) -> None:
+        """Отправка уведомления о запуске бота и текущем статусе."""
+        admins = await self.db.get_admins()
+        if not admins:
+            return
+
+        text = f"🚀 <b>Бот запущен!</b>\n\n"
+        text += f"Отслеживается аккаунтов: {len(accounts)}\n"
+        if accounts:
+            text += "\n<b>Список аккаунтов:</b>\n"
+            for acc in accounts:
+                steam_id = acc["steam_id64"]
+                interval = acc.get("interval_minutes", self.monitor.check_interval)
+                text += f"- <a href='https://steamcommunity.com/profiles/{steam_id}'>{steam_id}</a> (интервал: {interval} мин)\n"
+        
+        for chat_id in admins:
+            try:
+                await self.app.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode=constants.ParseMode.HTML,
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки стартового уведомления: {e}")
+
+    async def send_dashboard_summary(self, results: list) -> None:
+        """Отправка сводного отчета (дэшборда) по всем аккаунтам."""
+        admins = await self.db.get_admins()
+        if not admins:
+            return
+
+        summary_parts = []
+        has_changes = False
+
+        for result in results:
+            steam_id = result["steam_id"]
+            profile_url = f"https://steamcommunity.com/profiles/{steam_id}"
+            part = f"👤 <a href='{profile_url}'>{steam_id}</a>:"
+
+            if result["error"]:
+                part += f" ❌ Ошибка: {result['error']}"
+                has_changes = True # Считаем ошибку изменением для отправки
+            elif not result["added"] and not result["removed"]:
+                part += " ✅ Изменений нет"
+            else:
+                has_changes = True
+                if result["added"]:
+                    part += f" 🟢 {len(result['added'])} доб."
+                if result["removed"]:
+                    part += f" 🔴 {len(result['removed'])} уб."
+            
+            summary_parts.append(part)
+
+        # Отправляем дэшборд, только если были изменения или ошибки
+        if has_changes:
+            header = f"📊 <b>Сводка за {datetime.now().strftime('%H:%M')}</b> 📊\n\n"
+            full_message = header + "\n".join(summary_parts)
+            
+            for chat_id in admins:
+                try:
+                    await self.app.bot.send_message(
+                        chat_id=chat_id,
+                        text=full_message,
+                        parse_mode=constants.ParseMode.HTML,
+                        disable_web_page_preview=True
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка отправки дэшборда: {e}")
+        else:
+            logger.info("Дэшборд не отправлен, так как не было изменений.")
 
     async def send_inventory_update(
         self,
@@ -204,6 +300,7 @@ class SteamMonitorBot:
 /set_interval [минуты] - Изменить интервал
 /check [steamid] - Проверить инвентарь сейчас
 /history [steamid] - История изменений
+/dashboard - 📊 Ручной вызов сводки
 /status - Статус мониторинга
 /help - Помощь
 
@@ -549,10 +646,46 @@ class SteamMonitorBot:
             BotCommand("check", "Проверить инвентарь"),
             BotCommand("status", "Статус бота"),
             BotCommand("proxy", "Настройки прокси"),
-            BotCommand("help", "Помощь"),
+            BotCommand("help", "❓ Помощь"),
+            BotCommand("dashboard", "📊 Ручной вызов сводки")
         ]
         await self.app.bot.set_my_commands(commands)
         logger.info("Меню команд установлено")
+
+    async def dashboard_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Обработчик команды /dashboard для ручного вызова сводки."""
+        results = self.monitor.get_last_dashboard_results()
+        if not results:
+            await update.message.reply_text("Еще не было собрано данных для дэшборда. Пожалуйста, подождите завершения первого цикла проверки.")
+            return
+
+        summary_parts = []
+        for result in results:
+            steam_id = result["steam_id"]
+            profile_url = f"https://steamcommunity.com/profiles/{steam_id}"
+            part = f"👤 <a href='{profile_url}'>{steam_id}</a>:"
+
+            if result["error"]:
+                part += f" ❌ Ошибка: {result['error']}"
+            elif not result["added"] and not result["removed"]:
+                part += " ✅ Изменений нет"
+            else:
+                if result["added"]:
+                    part += f" 🟢 {len(result['added'])} доб."
+                if result["removed"]:
+                    part += f" 🔴 {len(result['removed'])} уб."
+            
+            summary_parts.append(part)
+
+        header = f"📊 <b>Сводка за {datetime.now().strftime('%H:%M')}</b> 📊\n\n"
+        full_message = header + "\n".join(summary_parts)
+        
+        await update.message.reply_text(
+            text=full_message,
+            parse_mode=constants.ParseMode.HTML,
+            disable_web_page_preview=True
+        )
+
 
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Обработчик нажатия inline кнопок"""

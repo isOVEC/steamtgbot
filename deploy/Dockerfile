@@ -18,7 +18,9 @@ RUN pip install --no-cache-dir \
     steampy>=0.14.0 \
     aiohttp>=3.8.0 \
     deepdiff>=6.0.0 \
-    python-dotenv>=1.0.0
+    python-dotenv>=1.0.0 \
+    aiosqlite>=0.19.0 \
+    python-json-logger>=2.0.0
 
 # Копирование кода бота
 COPY bot.py .
