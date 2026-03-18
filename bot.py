@@ -275,13 +275,32 @@ class SteamMonitorBot:
     def run(self) -> None:
         """Запускает бота и блокирует выполнение до его остановки."""
         logger.info("Запуск бота...")
+        
+        loop = None
         try:
-            asyncio.run(self._main_loop())
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._main_loop())
         except KeyboardInterrupt:
             # При нажатии Ctrl+C asyncio.run завершается, и мы попадаем сюда
             logger.info("Бот остановлен пользователем (KeyboardInterrupt).")
+        except SystemExit:
+            logger.info("Бот получил команду на выход (SystemExit).")
+            raise
         except Exception as e:
             logger.critical(f"Критическая ошибка в главном цикле выполнения: {e}", exc_info=True)
+            raise
+        finally:
+            if loop and not loop.is_closed():
+                # Корректно закрываем все задачи
+                pending = asyncio.all_tasks(loop)
+                if pending:
+                    logger.info(f"Отмена {len(pending)} ожидающих задач...")
+                    for task in pending:
+                        task.cancel()
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                loop.close()
+                logger.info("Event loop закрыт.")
 
     async def _main_loop(self) -> None:
         """Главный асинхронный цикл: инициализация и запуск всех компонентов."""

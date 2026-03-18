@@ -25,11 +25,9 @@ COPY steam_api.py .
 COPY logger_config.py .
 COPY utils.py .
 
-# Создание non-root пользователя
-RUN useradd --create-home --shell /bin/bash steam-bot \
-    && chown -R steam-bot:steam-bot /app
-
-USER steam-bot
+# Создание директории для логов и базы данных
+RUN mkdir -p /app/logs /app/data && \
+    chown -R root:root /app
 
 # Точка входа
 CMD ["python", "main.py"]

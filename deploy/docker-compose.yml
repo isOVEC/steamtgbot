@@ -18,9 +18,15 @@ services:
       - PROXY_URL=${PROXY_URL:-}
       - PROXY_ENABLED=${PROXY_ENABLED:-false}
       - CHECK_INTERVAL_MINUTES=${CHECK_INTERVAL_MINUTES:-30}
+      - MIN_CHECK_INTERVAL=${MIN_CHECK_INTERVAL:-5}
+      - MAX_CHECK_INTERVAL=${MAX_CHECK_INTERVAL:-1440}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - RETRY_DELAY=${RETRY_DELAY:-5}
+      - EXPONENTIAL_BACKOFF=${EXPONENTIAL_BACKOFF:-true}
+      - DEFAULT_GAME=${DEFAULT_GAME:-cs2}
     volumes:
       - steam_db:/app
-      - steam_logs:/app/bot_logs
+      - steam_logs:/app/logs
     healthcheck:
       test: ["CMD-SHELL", "ps aux | grep '[m]ain.py' || exit 1"]
       interval: 30s
