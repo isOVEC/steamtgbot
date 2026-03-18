@@ -56,16 +56,17 @@ mkdir -p /var/log/steam-bot
 # Шаг 5: Клонирование и настройка
 echo -e "${YELLOW}[5/7] Клонирование репозитория...${NC}"
 cd /opt
-git clone https://github.com/isOVEC/steamtgbot.git steamtgbot
-mv steamtgbot/* .  # full replace
-rm -rf steamtgbot
+rm -rf steam-inventory-bot  # full replace old copy
+git clone https://github.com/isOVEC/steamtgbot.git steam-inventory-bot
 chown -R steam-bot:steam-bot steam-inventory-bot
 
 # Шаг 6: Docker запуск
 echo -e "${YELLOW}[6/7] Запуск Docker...${NC}"
 cd /opt/steam-inventory-bot/deploy
-cp ../../deploy/.env.example ../../.env
-chown steam-bot .env
+cp .env.example .env
+chown steam-bot:steam-bot .env
+echo -e "${YELLOW}Edit .env now (nano .env) then press Enter to continue...${NC}"
+read
 docker compose up -d --build
 
 echo -e "${GREEN}✅ Docker бот запущен!${NC}"
