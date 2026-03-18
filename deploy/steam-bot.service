@@ -4,17 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
+User=steam-bot
+EnvironmentFile=/opt/steam-inventory-bot/.env
 WorkingDirectory=/opt/steam-inventory-bot
 ExecStart=/usr/bin/python3 /opt/steam-inventory-bot/main.py
 Restart=always
 RestartSec=10
-
-# Переменные окружения
-Environment="TELEGRAM_BOT_TOKEN=YOUR_TOKEN_HERE"
-Environment="TELEGRAM_CHAT_ID=YOUR_CHAT_ID_HERE"
-Environment="STEAM_API_KEY=YOUR_STEAM_KEY_HERE"
-Environment="CHECK_INTERVAL_MINUTES=30"
 
 # Логирование
 StandardOutput=journal

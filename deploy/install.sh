@@ -4,8 +4,14 @@
 set -e
 
 echo "=========================================="
-echo "Steam Inventory Bot - Установка на VPS"
+echo "Steam Inventory Bot - Установка на VPS (Docker preferred)"
 echo "=========================================="
+
+# Проверка Ubuntu/Debian
+if ! lsb_release -a 2>/dev/null | grep -qE "(Ubuntu|Debian)"; then
+    echo -e "${RED}Поддерживается только Ubuntu/Debian${NC}"
+    exit 1
+fi
 
 # Цвета для вывода
 RED='\033[0;31m'
@@ -23,9 +29,17 @@ fi
 echo -e "${YELLOW}[1/6] Обновление системы...${NC}"
 apt update && apt upgrade -y
 
-# Шаг 2: Установка Python и зависимостей
-echo -e "${YELLOW}[2/6] Установка Python и зависимостей...${NC}"
-apt install -y python3 python3-pip python3-venv git
+# Шаг 2: Установка Docker и Docker Compose
+echo -e "${YELLOW}[2/7] Установка Docker и Docker Compose...${NC}"
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+usermod -aG docker steam-bot
+systemctl enable docker --now
+
+# Шаг 2.1: Python for systemd fallback
+apt install -y python3 python3-pip git
 
 # Шаг 3: Создание пользователя для бота
 echo -e "${YELLOW}[3/6] Создание пользователя...${NC}"
@@ -39,27 +53,21 @@ echo -e "${YELLOW}[4/6] Создание директорий...${NC}"
 mkdir -p /opt/steam-inventory-bot
 mkdir -p /var/log/steam-bot
 
-# Шаг 5: Копирование файлов
-echo -e "${YELLOW}[5/6] Копирование файлов бота...${NC}"
-# Скопируйте файлы проекта в /opt/steam-inventory-bot
-# (это нужно сделать вручную или через git)
+# Шаг 5: Клонирование и настройка
+echo -e "${YELLOW}[5/7] Клонирование репозитория...${NC}"
+cd /opt
+git clone https://github.com/isOVEC/steamtgbot.git steamtgbot
+mv steamtgbot/* .  # full replace
+rm -rf steamtgbot
+chown -R steam-bot:steam-bot steam-inventory-bot
 
-# Шаг 6: Установка Python зависимостей
-echo -e "${YELLOW}[6/6] Установка Python зависимостей...${NC}"
-cd /opt/steam-inventory-bot
-pip3 install -r requirements.txt
+# Шаг 6: Docker запуск
+echo -e "${YELLOW}[6/7] Запуск Docker...${NC}"
+cd /opt/steam-inventory-bot/deploy
+cp ../../deploy/.env.example ../../.env
+chown steam-bot .env
+docker compose up -d --build
 
-# Настройка прав
-chown -R steam-bot:steam-bot /opt/steam-inventory-bot
-chown -R steam-bot:steam-bot /var/log/steam-bot
-
-echo -e "${GREEN}==========================================${NC}"
-echo -e "${GREEN}Установка завершена!${NC}"
-echo -e "${GREEN}==========================================${NC}"
-echo ""
-echo "Следующие шаги:"
-echo "1. Отредактируйте /opt/steam-inventory-bot/.env"
-echo "2. Скопируйте deploy/steam-bot.service в /etc/systemd/system/"
-echo "3. Запустите: systemctl daemon-reload"
-echo "4. Запустите бота: systemctl start steam-bot"
-echo "5. Проверьте статус: systemctl status steam-bot"
+echo -e "${GREEN}✅ Docker бот запущен!${NC}"
+echo -e "${GREEN}Логи: docker compose logs -f${NC}"
+echo -e "${GREEN}Остановка: docker compose down${NC}"

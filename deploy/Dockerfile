@@ -3,24 +3,17 @@ FROM python:3.11-slim
 
 # Установка зависимостей системы
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
+    gcc g++ \
+    && pip cache purge \
     && rm -rf /var/lib/apt/lists/*
 
 # Рабочая директория
 WORKDIR /app
 
-# Копирование зависимостей
-COPY requirements.txt .
+# Копирование Docker-зависимостей
+COPY deploy/requirements-docker.txt ./requirements-docker.txt
 
-# Установка Python-зависимостей (без GUI-библиотек)
-RUN pip install --no-cache-dir \
-    python-telegram-bot>=20.0 \
-    steampy>=0.14.0 \
-    aiohttp>=3.8.0 \
-    deepdiff>=6.0.0 \
-    python-dotenv>=1.0.0 \
-    aiosqlite>=0.19.0 \
-    python-json-logger>=2.0.0
+RUN pip install --no-cache-dir -r requirements-docker.txt
 
 # Копирование кода бота
 COPY bot.py .
@@ -32,4 +25,11 @@ COPY steam_api.py .
 COPY logger_config.py .
 COPY utils.py .
 
+# Создание non-root пользователя
+RUN useradd --create-home --shell /bin/bash steam-bot \
+    && chown -R steam-bot:steam-bot /app
+
+USER steam-bot
+
 # Точка входа
+CMD ["python", "main.py"]
