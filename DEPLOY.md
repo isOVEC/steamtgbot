@@ -16,17 +16,19 @@ cd steamtgbot
 
 2. **Настройте переменные окружения:**
 ```bash
+# Скопировать готовый .env с тестовыми данными
 cp deploy/.env.production .env
+```
+
+3. **Отредактируйте .env если нужно:**
+```bash
 nano .env
 ```
 
-3. **Заполните .env:**
-```env
-TELEGRAM_BOT_TOKEN=ваш_токен_бота
-TELEGRAM_CHAT_ID=ваш_chat_id
-STEAM_API_KEY=ваш_steam_api_key
-CHECK_INTERVAL_MINUTES=30
-```
+Тестовые данные уже добавлены:
+- `TELEGRAM_BOT_TOKEN=8022071544:AAF9BH9ZsdKsku4Ps5TUu5vTf9tHytPeCl0`
+- `STEAM_API_KEY=D6F0E8D6197B5E4B8A3F939CBC779ACD`
+- `CHECK_INTERVAL_MINUTES=5`
 
 4. **Соберите и запустите:**
 ```bash
