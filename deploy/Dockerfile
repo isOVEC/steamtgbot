@@ -10,6 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Рабочая директория
 WORKDIR /app
 
+# Создание директорий для данных и логов
+RUN mkdir -p /app/data /app/logs
+
 # Копирование Docker-зависимостей
 COPY deploy/requirements-docker.txt ./requirements-docker.txt
 
@@ -24,10 +27,6 @@ COPY monitor.py .
 COPY steam_api.py .
 COPY logger_config.py .
 COPY utils.py .
-
-# Создание директории для логов и базы данных
-RUN mkdir -p /app/logs /app/data && \
-    chown -R root:root /app
 
 # Точка входа
 CMD ["python", "main.py"]

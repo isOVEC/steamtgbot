@@ -1,9 +1,5 @@
 version: '3.8'
 
-volumes:
-  steam_db:
-  steam_logs:
-
 services:
   steam-bot:
     build: 
@@ -24,8 +20,9 @@ services:
       - RETRY_DELAY=${RETRY_DELAY:-5}
       - EXPONENTIAL_BACKOFF=${EXPONENTIAL_BACKOFF:-true}
       - DEFAULT_GAME=${DEFAULT_GAME:-cs2}
+      - DATABASE_PATH=/app/data/steam_monitor.db
     volumes:
-      - steam_db:/app
+      - steam_data:/app/data
       - steam_logs:/app/logs
     healthcheck:
       test: ["CMD-SHELL", "ps aux | grep '[m]ain.py' || exit 1"]
@@ -35,6 +32,10 @@ services:
       start_period: 60s
     networks:
       - steam-bot-network
+
+volumes:
+  steam_data:
+  steam_logs:
 
 networks:
   steam-bot-network:
