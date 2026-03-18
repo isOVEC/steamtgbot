@@ -10,6 +10,13 @@ aiohttp>=3.8.0
 # Deep comparison
 deepdiff>=6.0.0
 
+# GUI
+customtkinter>=5.2.0
+pillow>=10.0.0
+
+# Build EXE
+pyinstaller>=6.0.0
+
 # Database
 aiosqlite>=0.19.0
 

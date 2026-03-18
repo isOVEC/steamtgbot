@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  steam-bot:
+    build: 
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: steam-inventory-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - STEAM_API_KEY=${STEAM_API_KEY}
+      - PROXY_URL=${PROXY_URL:-}
+      - PROXY_ENABLED=${PROXY_ENABLED:-false}
+      - CHECK_INTERVAL_MINUTES=${CHECK_INTERVAL_MINUTES:-30}
+    volumes:
+      - ../bot.db:/app/steam_monitor.db
+      - ../bot.log:/app/bot.log
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "python.*main.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - steam-bot-network
+
+networks:
+  steam-bot-network:
+    driver: bridge

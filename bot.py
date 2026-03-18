@@ -11,6 +11,7 @@ from telegram import (
     Update, 
     InlineKeyboardButton, 
     InlineKeyboardMarkup,
+    BotCommand,
     constants
 )
 from telegram.ext import (
@@ -18,6 +19,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     ConversationHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters
 )
@@ -65,6 +67,30 @@ class SteamMonitorBot:
         # Установка callback для уведомлений
         self.monitor.set_notification_callback(self.send_inventory_update)
         
+        # Инициализация Telegram Application
+        self.app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        
+        # Регистрируем обработчики команд
+        self.app.add_handler(CommandHandler("start", self.start_command))
+        self.app.add_handler(CommandHandler("help", self.help_command))
+        self.app.add_handler(CommandHandler("add", self.add_command))
+        self.app.add_handler(CommandHandler("remove", self.remove_command))
+        self.app.add_handler(CommandHandler("list", self.list_command))
+        self.app.add_handler(CommandHandler("set_interval", self.set_interval_command))
+        self.app.add_handler(CommandHandler("status", self.status_command))
+        self.app.add_handler(CommandHandler("check", self.check_command))
+        self.app.add_handler(CommandHandler("history", self.history_command))
+        self.app.add_handler(CommandHandler("proxy", self.proxy_command))
+
+        # Обработчик callback (inline кнопки)
+        self.app.add_handler(CallbackQueryHandler(self.button_callback))
+        
+        # Обработчик ошибок
+        self.app.add_error_handler(self.error_handler)
+        
+        # Установка меню команд
+        await self._setup_commands()
+        
         # Запуск мониторинга
         await self.monitor.start()
         
@@ -97,28 +123,46 @@ class SteamMonitorBot:
         if not admins:
             return
         
-        text = ""
+        # Формируем ссылку на профиль и инвентарь
+        profile_url = f"https://steamcommunity.com/profiles/{steam_id64}"
+        inventory_url = f"{profile_url}/inventory/"
+        
+        # Заголовок с информацией об аккаунте
+        game_names = {
+            "cs2": "CS2",
+            "csgo": "CS2",
+            "dota2": "Dota 2",
+            "tf2": "Team Fortress 2"
+        }
+        game_name = game_names.get(game.lower(), game.upper())
+        
+        text = f"📊 <b>Изменения в инвентаре</b>\n\n"
+        text += f"👤 <b>Аккаунт:</b> <a href='{profile_url}'>{steam_id64}</a>\n"
+        text += f"🎮 <b>Игра:</b> {game_name}\n"
+        text += f"📅 <b>Дата проверки:</b> {__import__('datetime').datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+        text += "─" * 25 + "\n\n"
         
         # Формируем сообщение о добавленных предметах
         if added:
-            text += "🟢 <b>Добавлены предметы:</b>\n"
-            for item in added[:10]:  # Ограничиваем до 10 предметов
+            text += f"🟢 <b>Добавлено ({len(added)}):</b>\n"
+            for i, item in enumerate(added[:15], 1):  # Ограничиваем до 15 предметов
                 name = item.get("market_name", "Unknown")
-                text += f"• {name}\n"
-            if len(added) > 10:
-                text += f"... и ещё {len(added) - 10}\n"
+                text += f"{i}. {name}\n"
+            if len(added) > 15:
+                text += f"   ... и ещё {len(added) - 15} предметов\n"
             text += "\n"
         
         # Формируем сообщение об удалённых предметах
         if removed:
-            text += "🔴 <b>Удалены предметы:</b>\n"
-            for item in removed[:10]:
+            text += f"🔴 <b>Удалено ({len(removed)}):</b>\n"
+            for i, item in enumerate(removed[:15], 1):
                 name = item.get("market_name", "Unknown")
-                text += f"• {name}\n"
-            if len(removed) > 10:
-                text += f"... и ещё {len(removed) - 10}\n"
+                text += f"{i}. {name}\n"
+            if len(removed) > 15:
+                text += f"   ... и ещё {len(removed) - 15} предметов\n"
+            text += "\n"
         
-        text += f"\n<i>Аккаунт: {steam_id64}</i>"
+        text += f"<a href='{inventory_url}'>🔗 Открыть инвентарь</a>"
         
         # Отправляем всем админам
         for chat_id in admins:
@@ -126,31 +170,14 @@ class SteamMonitorBot:
                 await self.app.bot.send_message(
                     chat_id=chat_id,
                     text=text,
-                    parse_mode=constants.ParseMode.HTML
+                    parse_mode=constants.ParseMode.HTML,
+                    disable_web_page_preview=True
                 )
             except Exception as e:
                 logger.error(f"Ошибка отправки уведомления: {e}")
 
     def run(self) -> None:
-        """Запуск бота"""
-        # Создаём приложение
-        self.app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-        
-        # Регистрируем обработчики команд
-        self.app.add_handler(CommandHandler("start", self.start_command))
-        self.app.add_handler(CommandHandler("help", self.help_command))
-        self.app.add_handler(CommandHandler("add", self.add_command))
-        self.app.add_handler(CommandHandler("remove", self.remove_command))
-        self.app.add_handler(CommandHandler("list", self.list_command))
-        self.app.add_handler(CommandHandler("set_interval", self.set_interval_command))
-        self.app.add_handler(CommandHandler("status", self.status_command))
-        self.app.add_handler(CommandHandler("check", self.check_command))
-        self.app.add_handler(CommandHandler("history", self.history_command))
-        
-        # Обработчик ошибок
-        self.app.add_error_handler(self.error_handler)
-        
-        # Запуск бота
+        """Запуск бота (синхронный метод для обратной совместимости)"""
         logger.info("Запуск бота...")
         self.app.run_polling(drop_pending_updates=True)
 
@@ -212,6 +239,8 @@ class SteamMonitorBot:
 
     async def add_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Обработчик команды /add"""
+        logger.info(f"[DEBUG] add_command вызван с args: {context.args}")
+        
         if not context.args:
             await update.message.reply_text(
                 "❌ Укажите SteamID64\n"
@@ -220,6 +249,7 @@ class SteamMonitorBot:
             return
         
         steam_id = context.args[0]
+        logger.info(f"[DEBUG] Попытка добавить аккаунт: {steam_id}")
         
         # Валидация SteamID
         if not self._validate_steam_id(steam_id):
@@ -230,7 +260,9 @@ class SteamMonitorBot:
             return
         
         # Добавляем аккаунт
+        logger.info(f"[DEBUG] Вызов db.add_target_account для {steam_id}")
         success = await self.db.add_target_account(steam_id, DEFAULT_INTERVAL)
+        logger.info(f"[DEBUG] db.add_target_account вернул: {success}")
         
         if success:
             # Запускаем мониторинг
@@ -411,31 +443,89 @@ class SteamMonitorBot:
     async def history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Обработчик команды /history"""
         if not context.args:
+            # Показываем список аккаунтов для выбора
+            accounts = await self.db.get_target_accounts()
+            
+            if not accounts:
+                await update.message.reply_text(
+                    "📭 Нет отслеживаемых аккаунтов\n"
+                    "Добавьте аккаунт: /add <SteamID64>"
+                )
+                return
+            
+            # Создаем inline кнопки для каждого аккаунта
+            keyboard = []
+            for account in accounts:
+                steam_id = account["steam_id64"]
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"📦 {steam_id}",
+                        callback_data=f"history:{steam_id}"
+                    )
+                ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await update.message.reply_text(
-                "❌ Укажите SteamID64\n"
-                "Пример: /history 76561198000000000"
+                "📜 Выберите аккаунт для просмотра истории:",
+                reply_markup=reply_markup
             )
             return
         
         steam_id = context.args[0]
-        
-        history = await self.db.get_recent_history(steam_id)
-        
-        if not history:
+        await self._show_history(update, context, steam_id, update.message)
+
+    async def proxy_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Обработчик команды /proxy"""
+        if not context.args:
+            # Показать текущий статус прокси
+            from config import PROXY_ENABLED, PROXY_URL
+            status = "🔴 Выключен" if not PROXY_ENABLED else "🟢 Включен"
             await update.message.reply_text(
-                f"📭 Нет истории для {steam_id}"
+                f"🌐 <b>Статус прокси:</b> {status}\n"
+                f"URL: <code>{PROXY_URL}</code>\n\n"
+                f"<b>Команды:</b>\n"
+                f"/proxy on - Включить прокси\n"
+                f"/proxy off - Выключить прокси\n"
+                f"/proxy set [url] - Установить URL прокси\n\n"
+                f"<i>Примечание: Изменения требуют перезапуска бота</i>",
+                parse_mode=constants.ParseMode.HTML
             )
             return
         
-        text = f"📜 История для {steam_id}:\n\n"
+        action = context.args[0].lower()
         
-        for event in history[:10]:
-            icon = "🟢" if event["event_type"] == "ADD" else "🔴"
-            name = event["item_name"]
-            timestamp = event["timestamp"]
-            text += f"{icon} {name} - {timestamp}\n"
-        
-        await update.message.reply_text(text)
+        if action == "on":
+            await update.message.reply_text(
+                "✅ Для включения прокси добавьте в .env файл:\n"
+                "<code>PROXY_ENABLED=true</code>\n"
+                "<code>PROXY_URL=http://ip:port</code>\n\n"
+                "Затем перезапустите бота.",
+                parse_mode=constants.ParseMode.HTML
+            )
+        elif action == "off":
+            await update.message.reply_text(
+                "✅ Для выключения прокси измените в .env файле:\n"
+                "<code>PROXY_ENABLED=false</code>\n\n"
+                "Затем перезапустите бота.",
+                parse_mode=constants.ParseMode.HTML
+            )
+        elif action == "set" and len(context.args) > 1:
+            proxy_url = " ".join(context.args[1:])
+            await update.message.reply_text(
+                f"✅ Для установки прокси добавьте в .env файл:\n"
+                f"<code>PROXY_URL={proxy_url}</code>\n\n"
+                "Затем перезапустите бота.",
+                parse_mode=constants.ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Неверная команда\n"
+                "Используйте:\n"
+                "/proxy on - Включить\n"
+                "/proxy off - Выключить\n"
+                "/proxy set [url] - Установить URL"
+            )
 
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Обработчик ошибок"""
@@ -447,6 +537,88 @@ class SteamMonitorBot:
         # Проверяем, что это 17-значное число
         pattern = r'^\d{17}$'
         return bool(re.match(pattern, steam_id))
+
+    async def _setup_commands(self) -> None:
+        """Установка меню команд бота"""
+        commands = [
+            BotCommand("start", "Запустить бота"),
+            BotCommand("add", "Добавить Steam аккаунт"),
+            BotCommand("remove", "Удалить Steam аккаунт"),
+            BotCommand("list", "Список отслеживаемых аккаунтов"),
+            BotCommand("history", "История изменений"),
+            BotCommand("check", "Проверить инвентарь"),
+            BotCommand("status", "Статус бота"),
+            BotCommand("proxy", "Настройки прокси"),
+            BotCommand("help", "Помощь"),
+        ]
+        await self.app.bot.set_my_commands(commands)
+        logger.info("Меню команд установлено")
+
+    async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Обработчик нажатия inline кнопок"""
+        query = update.callback_query
+        await query.answer()
+        
+        data = query.data
+        
+        if data.startswith("history:"):
+            steam_id = data.split(":")[1]
+            await self._show_history(update, context, steam_id, query.message)
+        elif data == "back_to_menu":
+            await self._show_main_menu(update, context, query.message)
+
+    async def _show_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                              message) -> None:
+        """Показать главное меню"""
+        user = update.effective_user
+        
+        text = f"""
+👋 Привет, {user.first_name}!
+
+Я бот для мониторинга Steam инвентаря.
+
+📋 <b>Доступные команды:</b>
+/add [steamid] - Добавить аккаунт
+/remove [steamid] - Удалить аккаунт
+/list - Список отслеживаемых аккаунтов
+/set_interval [минуты] - Изменить интервал
+/check [steamid] - Проверить инвентарь сейчас
+/history [steamid] - История изменений
+/status - Статус мониторинга
+/help - Помощь
+
+🔗 Для добавления аккаунта используйте SteamID64
+"""
+        
+        await message.edit_text(text, parse_mode=constants.ParseMode.HTML)
+
+    async def _show_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                           steam_id: str, message) -> None:
+        """Показать историю изменений для аккаунта"""
+        history = await self.db.get_recent_history(steam_id)
+        
+        if not history:
+            keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await message.edit_text(
+                f"📭 Нет истории для {steam_id}",
+                reply_markup=reply_markup
+            )
+            return
+        
+        text = f"📜 История для {steam_id}:\n\n"
+        
+        for event in history[:10]:
+            icon = "🟢" if event["event_type"] == "ADD" else "🔴"
+            name = event["item_name"]
+            timestamp = event["timestamp"]
+            text += f"{icon} {name} - {timestamp}\n"
+        
+        # Кнопка возврата в меню
+        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await message.edit_text(text, reply_markup=reply_markup)
 
 
 # Глобальный экземпляр бота

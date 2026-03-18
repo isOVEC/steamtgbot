@@ -103,18 +103,23 @@ class Database:
     async def add_target_account(self, steam_id64: str, interval_minutes: int = 5, 
                                    game: str = "cs2") -> bool:
         """Добавление аккаунта для мониторинга"""
+        logger.info(f"[DEBUG] add_target_account вызван: steam_id64={steam_id64}, interval={interval_minutes}, game={game}")
+        logger.info(f"[DEBUG] Состояние подключения: {self._connection is not None}")
+        
         try:
             async with self._connection.cursor() as cursor:
+                logger.info("[DEBUG] Курсор создан, выполняю INSERT...")
                 await cursor.execute("""
                     INSERT OR REPLACE INTO target_accounts 
                     (steam_id64, interval_minutes, is_active, game)
                     VALUES (?, ?, 1, ?)
                 """, (steam_id64, interval_minutes, game))
+                logger.info("[DEBUG] INSERT выполнен, выполняю commit...")
                 await self._connection.commit()
                 logger.info(f"Добавлен аккаунт {steam_id64} для мониторинга")
                 return True
         except Exception as e:
-            logger.error(f"Ошибка добавления аккаунта: {e}")
+            logger.error(f"Ошибка добавления аккаунта: {e}", exc_info=True)
             return False
 
     async def remove_target_account(self, steam_id64: str) -> bool:
@@ -137,7 +142,7 @@ class Database:
     async def get_target_accounts(self) -> List[Dict[str, Any]]:
         """Получение списка целевых аккаунтов"""
         async with self._connection.cursor() as cursor:
-            cursor.execute("""
+            await cursor.execute("""
                 SELECT steam_id64, interval_minutes, is_active, game, created_at
                 FROM target_accounts ORDER BY created_at DESC
             """)
@@ -147,7 +152,7 @@ class Database:
     async def get_active_accounts(self) -> List[Dict[str, Any]]:
         """Получение списка активных аккаунтов"""
         async with self._connection.cursor() as cursor:
-            cursor.execute("""
+            await cursor.execute("""
                 SELECT steam_id64, interval_minutes, game
                 FROM target_accounts WHERE is_active = 1
             """)
@@ -210,7 +215,7 @@ class Database:
     async def get_inventory(self, steam_id64: str) -> List[Dict[str, Any]]:
         """Получение текущего состояния инвентаря"""
         async with self._connection.cursor() as cursor:
-            cursor.execute("""
+            await cursor.execute("""
                 SELECT assetid, classid, instanceid, market_name, icon_url
                 FROM current_inventory WHERE steam_id64 = ?
             """, (steam_id64,))
@@ -233,7 +238,7 @@ class Database:
     async def get_recent_history(self, steam_id64: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Получение последних изменений инвентаря"""
         async with self._connection.cursor() as cursor:
-            cursor.execute("""
+            await cursor.execute("""
                 SELECT item_name, event_type, game, timestamp
                 FROM inventory_history 
                 WHERE steam_id64 = ?
@@ -258,7 +263,7 @@ class Database:
     async def get_admins(self) -> List[int]:
         """Получение списка администраторов"""
         async with self._connection.cursor() as cursor:
-            cursor.execute("SELECT chat_id FROM telegram_users WHERE is_admin = 1")
+            await cursor.execute("SELECT chat_id FROM telegram_users WHERE is_admin = 1")
             rows = await cursor.fetchall()
             return [row['chat_id'] for row in rows]
 
@@ -267,7 +272,7 @@ class Database:
     async def get_setting(self, key: str) -> Optional[str]:
         """Получение настройки"""
         async with self._connection.cursor() as cursor:
-            cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+            await cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
             row = await cursor.fetchone()
             return row['value'] if row else None
 
