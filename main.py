@@ -19,48 +19,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def main():
+def main():
     """Главная функция"""
     logger.info("[DIAGNOSTIC] main() начало выполнения")
-    from bot import SteamMonitorBot
-    
-    logger.info("[DIAGNOSTIC] Импорт SteamMonitorBot успешен")
-    bot = SteamMonitorBot()
-    logger.info("[DIAGNOSTIC] Экземпляр бота создан")
-    
     try:
-        await bot.initialize()
-        logger.info("[DIAGNOSTIC] Бот инициализирован успешно")
+        from bot import SteamMonitorBot
+        logger.info("[DIAGNOSTIC] Импорт SteamMonitorBot успешен")
         
-        # Инициализируем и запускаем polling
-        await bot.app.initialize()
-        await bot.app.updater.start_polling(drop_pending_updates=True)
-        await bot.app.start()
+        bot = SteamMonitorBot()
+        logger.info("[DIAGNOSTIC] Экземпляр бота создан")
         
-        # Блокируем выполнение до получения сигнала остановки
-        while True:
-            await asyncio.sleep(1)
-            
-    except KeyboardInterrupt:
-        logger.info("Получен сигнал остановки")
+        # Запускаем бота. Вся логика теперь внутри bot.run()
+        bot.run()
+        
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}", exc_info=True)
-    finally:
-        logger.info("Выключение бота...")
-        if bot.app.running:
-            await bot.app.stop()
-        if bot.app.updater.running:
-            await bot.app.updater.stop()
-        await bot.shutdown()
-
+        logger.critical(f"Критическая ошибка на верхнем уровне: {e}", exc_info=True)
+        # В случае критической ошибки, выходим с кодом 1
+        sys.exit(1)
 
 if __name__ == "__main__":
     logger.info("[DIAGNOSTIC] main.py запущен как основной модуль")
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("[DIAGNOSTIC] Бот остановлен пользователем")
-        print("Бот остановлен")
-    except Exception as e:
-        logger.error(f"[DIAGNOSTIC] Критическая ошибка в main: {e}", exc_info=True)
-        raise
+    main()

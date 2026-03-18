@@ -273,9 +273,37 @@ class SteamMonitorBot:
                 logger.error(f"Ошибка отправки уведомления: {e}")
 
     def run(self) -> None:
-        """Запуск бота (синхронный метод для обратной совместимости)"""
+        """Запускает бота и блокирует выполнение до его остановки."""
         logger.info("Запуск бота...")
-        self.app.run_polling(drop_pending_updates=True)
+        try:
+            asyncio.run(self._main_loop())
+        except KeyboardInterrupt:
+            # При нажатии Ctrl+C asyncio.run завершается, и мы попадаем сюда
+            logger.info("Бот остановлен пользователем (KeyboardInterrupt).")
+        except Exception as e:
+            logger.critical(f"Критическая ошибка в главном цикле выполнения: {e}", exc_info=True)
+
+    async def _main_loop(self) -> None:
+        """Главный асинхронный цикл: инициализация и запуск всех компонентов."""
+        
+        # Сначала нам нужно создать self.app, вызвав self.initialize()
+        await self.initialize()
+        logger.info("Компоненты бота (БД, Steam API, Монитор) инициализированы.")
+
+        # Используем менеджер контекста для self.app, который позаботится
+        # о правильной инициализации и остановке.
+        async with self.app:
+            logger.info("Запуск Telegram Application...")
+            # Мониторинг инвентаря уже запущен в фоновом режиме внутри self.initialize()
+            # Теперь запускаем polling для получения обновлений от Telegram.
+            await self.app.updater.start_polling(drop_pending_updates=True)
+            await self.app.start()
+            
+            logger.info("Бот успешно запущен и готов к работе.")
+            
+            # Бесконечно ждем, пока не придет сигнал остановки (например, KeyboardInterrupt)
+            # Это удержит скрипт в рабочем состоянии.
+            await asyncio.Event().wait()
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Обработчик команды /start"""
